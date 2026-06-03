@@ -1,0 +1,6 @@
+Downloads/
+config.json
+분석결과_2*.xlsx
+__pycache__/
+*.pyc
+*.pyo
