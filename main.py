@@ -634,6 +634,8 @@ def collect_worker(params: dict, msg_q: queue.Queue, stop_ev: threading.Event):
                     seen_seqs.add(seq)
                     collected.append((keyword, item))
                     kw_new += 1
+                    if kw_new >= max_per_kw:
+                        break
 
                 kw_filtered += page_filtered
                 kw_dup += page_dup
