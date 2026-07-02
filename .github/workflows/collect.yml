@@ -1,0 +1,85 @@
+name: 온라인 수집
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "요청 고유 ID (웹사이트에서 생성, Release 태그로 사용)"
+        required: true
+        type: string
+      keywords:
+        description: "쉼표로 구분된 검색 키워드 (예: 전산직,정보통신)"
+        required: true
+        type: string
+      include_expr:
+        description: "포함 필터 표현식 (A|B, A&B 문법)"
+        required: false
+        default: ""
+        type: string
+      exclude_expr:
+        description: "제외 필터 표현식"
+        required: false
+        default: ""
+        type: string
+      max_per_kw:
+        description: "키워드당 최대 수집 개수"
+        required: false
+        default: "100"
+        type: string
+      download_files:
+        description: "첨부파일 다운로드 여부 (정확도는 높아지지만 시간이 더 걸림)"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect-${{ github.event.inputs.job_id }}
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: RealProgram
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: 수집 실행
+        id: collect
+        run: |
+          DOWNLOAD_FLAG=""
+          if [ "${{ github.event.inputs.download_files }}" != "true" ]; then
+            DOWNLOAD_FLAG="--no-download"
+          fi
+          python headless_collect.py \
+            --keywords "${{ github.event.inputs.keywords }}" \
+            --include-expr "${{ github.event.inputs.include_expr }}" \
+            --exclude-expr "${{ github.event.inputs.exclude_expr }}" \
+            --max-per-kw "${{ github.event.inputs.max_per_kw }}" \
+            --output-dir ./output \
+            $DOWNLOAD_FLAG
+
+      - name: 결과 파일 이름 고정
+        run: cp "${{ steps.collect.outputs.excel_path }}" ./output/result.xlsx
+
+      - name: Release에 결과 업로드
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "run-${{ github.event.inputs.job_id }}" \
+            "output/result.xlsx" \
+            --title "수집 결과 ${{ github.event.inputs.job_id }}" \
+            --notes "웹사이트에서 요청한 온라인 수집 결과입니다." \
+            --repo "${{ github.repository }}"
