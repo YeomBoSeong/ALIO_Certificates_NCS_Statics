@@ -6,6 +6,7 @@ NCS 및 자격증 정보를 추출해 Excel 파일로 저장합니다.
 수집/분석 핵심 로직은 collector_core.py에 있습니다 (GUI 없는 환경에서도 재사용 가능).
 """
 import os
+import sys
 import threading
 import queue
 from pathlib import Path
@@ -19,6 +20,15 @@ from collector_core import (
     ALIO_JOB_TYPES, ALIO_DEFAULT_ON, NCS_CATEGORIES,
     load_config, save_config, collect_worker,
 )
+
+# PyInstaller(onefile)로 빌드된 exe에서는 __file__이 실행 시 압축이 풀리는
+# 임시 폴더(_MEIPASS)를 가리켜서, 프로그램 종료 시 그 폴더가 삭제되며 기본
+# 저장 위치도 함께 사라진다. exe로 실행 중일 때는 실제 exe가 있는 위치를
+# 기준으로 잡아야 한다.
+if getattr(sys, "frozen", False):
+    APP_DIR = Path(sys.executable).parent
+else:
+    APP_DIR = Path(__file__).parent
 
 # ════════════════════════════════════════════════════════════════
 # GUI
@@ -225,7 +235,7 @@ class App(tk.Tk):
         row += 1
 
         self._output_dir = ttk.Entry(out_lf)
-        self._output_dir.insert(0, str(Path(__file__).parent))
+        self._output_dir.insert(0, str(APP_DIR))
         self._output_dir.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         ttk.Button(out_lf, text="찾아보기", command=self._browse_output).grid(row=0, column=1)
 
