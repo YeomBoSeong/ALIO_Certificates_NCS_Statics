@@ -30,6 +30,8 @@ if getattr(sys, "frozen", False):
 else:
     APP_DIR = Path(__file__).parent
 
+DEFAULT_OUTPUT_DIR = APP_DIR / "ALIO_Downloads"
+
 # ════════════════════════════════════════════════════════════════
 # GUI
 # ════════════════════════════════════════════════════════════════
@@ -235,7 +237,7 @@ class App(tk.Tk):
         row += 1
 
         self._output_dir = ttk.Entry(out_lf)
-        self._output_dir.insert(0, str(APP_DIR))
+        self._output_dir.insert(0, str(DEFAULT_OUTPUT_DIR))
         self._output_dir.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         ttk.Button(out_lf, text="찾아보기", command=self._browse_output).grid(row=0, column=1)
 
