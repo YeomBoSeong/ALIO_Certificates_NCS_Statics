@@ -293,12 +293,20 @@ EXPLICIT_CERTS = [
     ("운전면허",               "운전면허"),
 ]
 
-_CERT_RE = re.compile(
-    r"([가-힣A-Z][가-힣A-Z\(\)·\s]{1,18}?(?:기사|산업기사|기능사|면허))",
-    re.IGNORECASE,
-)
+_CERT_SUFFIX_RE = re.compile(r"(?:기사|산업기사|기능사|면허)")
+# 후보 이름을 뒤에서 앞으로 훑을 때 허용할 문자.
+# 줄바꿈/탭/괄호는 제외한다 — 다른 문장·항목(예: "자격증(면허) 소지자" 같은 안내 문구)까지
+# 이어붙이면서 앞부분이 잘리거나 엉뚱한 텍스트가 섞이는 문제의 원인이었다.
+_CERT_CHARCLASS_RE = re.compile(r"[가-힣A-Z· ]")
+_CERT_MAX_LEN = 18
 _QUAL_SECTION_RE = re.compile(
-    r"(?:응시자격|자격기준|필요자격|자격요건|우대사항|필수자격|보유자격|취득자격)[^\n]{0,10}\n?(.{0,600})",
+    # 헤더 단어 뒤의 구분자(":", "-", 공백, 괄호, 태그 꺾쇠 등)만 건너뛴다.
+    # 예전엔 개행 전까지 아무 문자나 최대 10자를 무조건 건너뛰었는데,
+    # "<자격요건><응시 자격><간호사 면허증...>" 처럼 헤더 바로 뒤에 짧은
+    # 하위 태그가 연달아 붙는 유사-HTML 형식 문서에서는 이 고정폭 스킵이
+    # 실제 내용 한가운데서 끝나버려 자격증명 앞글자가 잘려나가는 원인이었다.
+    # 구분자가 아닌 실제 글자(한글/영문/숫자)는 절대 건너뛰지 않아야 한다.
+    r"(?:응시자격|자격기준|필요자격|자격요건|우대사항|필수자격|보유자격|취득자격)[\s:：\-–·.,\(\)\[\]<>]{0,10}(.{0,600})",
     re.DOTALL,
 )
 _CERT_NOISE = [
@@ -309,8 +317,42 @@ _CERT_NOISE = [
     r"필요한 자격증", r"관련 자격증", r"종료시\)", r"정량평가",
     r"\(국가", r"른 해당", r"직무 관련", r"자격목록", r"최종합격",
     r"자격증 사본", r"^에 관련된", r"^위의", r"^이전",
-    r"관련된 자격증", r"제시된 자격증",
+    r"관련된 자격증", r"제시된 자격증", r"응시자격", r"자격기준",
+    r"^자격[·\s]", r"^자격증",
+    # 실제 자격증명에는 절대 나타나지 않는 일반 서술 어휘 — 안내문 조각을 걸러낸다.
+    r"기준", r"다르거나", r"명시된", r"반드시", r"^기타", r"^최초",
+    r"^있어", r"^전문\s", r"^분야\s",
+    # "OO분야 기사/산업기사/기능사"는 특정 자격증명이 아니라 막연한 서술이다.
+    r"분야\s*(?:기사|산업기사|기능사)",
 ]
+# 진짜 자격증명 앞(혹은 두 자격증명 사이)에 끼어들어 오추출을 일으키는
+# 조사/접속사·안내 문구. 후보 문자열 전체에서 이 경계 표현이 나타나는
+# "마지막" 위치를 찾아 그 뒤쪽만 남긴다 — 예를 들어
+# "임상병리사면허 또는 방사선사 면허" 처럼 두 자격증이 접속사로 이어진
+# 채로 통째로 매치되는 경우, "또는" 뒤의 "방사선사 면허"만 남긴다.
+_BOUNDARY_RE = re.compile(
+    r"또는|및|혹은|그리고|위의|이전|관련된|제시된|해당하는|해당|필수|"
+    r"응시자격|자격기준|자격요건|필요자격|우대사항|보유자격|취득자격|자격증명|"
+    r"[은는이가을를와과의에로](?=\s)|"
+    # 숫자는 애초에 후보 문자에서 제외되므로("1명", "2급" 등) 숫자 뒤에 오는
+    # 단위명사만 홀로 남는다 — 이 경우 단위명사까지 마저 잘라낸다.
+    r"[명급종개회차위](?=\s)"
+)
+
+# 원문마다 "·" 대신 비슷하게 생긴 다른 유니코드 가운뎃점(‧ ∙ • ・ ⋅)을 쓰는 경우가 있어
+# 같은 자격증명이 서로 다른 문자열로 취급되어 통계가 쪼개지는 문제가 있었다. 하나로 통일한다.
+_DOT_VARIANTS_RE = re.compile("[‧∙•・⋅]")
+
+def _normalize_dots(s: str) -> str:
+    s = _DOT_VARIANTS_RE.sub("·", s)
+    return re.sub(r"\s*·\s*", "·", s)
+
+def _strip_leading_noise(cert: str) -> str:
+    cert = _normalize_dots(cert).strip(" ·")
+    last_end = 0
+    for bm in _BOUNDARY_RE.finditer(cert):
+        last_end = bm.end()
+    return cert[last_end:].strip(" ·")
 
 def _is_valid_cert(cert: str) -> bool:
     cert = re.sub(r"\s+", " ", cert).strip()
@@ -327,14 +369,46 @@ def extract_certs(text: str) -> list:
     for kw, canonical in EXPLICIT_CERTS:
         if kw.lower() in text_lower:
             found.add(canonical)
+
+    section_found: set = set()
     for m in _QUAL_SECTION_RE.finditer(text):
-        for cm in _CERT_RE.finditer(m.group(1)):
-            c = cm.group(1).strip()
-            if _is_valid_cert(c):
-                found.add(c)
+        section = m.group(1)
+        # 접미사(기사/산업기사/기능사/면허)가 나오는 지점마다 독립적으로 뒤에서
+        # 앞으로 스캔한다. 예전에는 finditer가 이전 매치 끝에서부터 이어서
+        # 스캔했기 때문에, 앞쪽에 잡음(조사·안내문구)이 함께 매치되면 바로 뒤에
+        # 오는 진짜 자격증명의 앞글자가 잘려나가는 문제가 있었다.
+        for sm in _CERT_SUFFIX_RE.finditer(section):
+            end = sm.end()
+            start = end
+            while start > 0 and (end - start) < _CERT_MAX_LEN and _CERT_CHARCLASS_RE.match(section[start - 1]):
+                start -= 1
+            candidate = _strip_leading_noise(section[start:end])
+            if _is_valid_cert(candidate):
+                section_found.add(candidate)
+
+    tag_found: set = set()
     for cert in re.findall(r"<([^<>]{4,30}(?:기사|산업기사|기능사|면허))>", text):
+        cert = _strip_leading_noise(cert)
         if _is_valid_cert(cert):
-            found.add(cert)
+            tag_found.add(cert)
+
+    # 태그 규칙(<...>)은 항목 경계가 명확해 일반 스캔보다 더 완전한 이름을 잡아낸다.
+    # 예: "<영선·조경기사>"는 온전히 잡히지만, 같은 텍스트를 일반 스캔이 훑으면
+    # 가운뎃점에서 멈춰 "조경기사"만 잡는다. 이런 경우에만 짧은 쪽을 버린다.
+    # (일반 스캔끼리는 서로 다른 자격증이 우연히 부분 문자열 관계일 수 있으므로
+    # — 예: "건축기사"와 "실내건축기사" — 서로 건드리지 않는다.)
+    section_found = {
+        c for c in section_found
+        if not any(c != t and c in t for t in tag_found)
+    }
+    regex_found = section_found | tag_found
+
+    for c in regex_found:
+        # 이미 명시적으로 잡힌 자격증명을 잡음과 함께 다시 잡은 경우(부분 문자열로
+        # 포함)는 중복/오염된 항목이므로 건너뛴다.
+        if any(kw != c and kw in c for kw, _ in EXPLICIT_CERTS):
+            continue
+        found.add(c)
     return sorted(found)
 
 
