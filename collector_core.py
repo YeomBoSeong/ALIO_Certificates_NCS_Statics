@@ -3,8 +3,7 @@ ALIO 공기업 채용공고 수집기 - 핵심 로직
 opendata.alio.go.kr 공개 API로 채용공고를 수집하고
 NCS 및 자격증 정보를 추출해 Excel 파일로 저장합니다.
 
-GUI(main.py)와 headless CLI(headless_collect.py) 양쪽에서 공유하는 모듈입니다.
-tkinter를 import하지 않으므로 디스플레이가 없는 서버(GitHub Actions 등)에서도 동작합니다.
+tkinter를 import하지 않으므로 디스플레이가 없는 환경에서도 동작합니다.
 """
 import re
 import json
